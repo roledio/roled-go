@@ -1,7 +1,6 @@
-// Package roled provides the official Go SDK for the Roled Identity & Access Management (IAM) API.
+// Package roled provides the official Go SDK for the Roled API.
 //
-// Roled provides authentication, authorization, role-based access control (RBAC),
-// and user management for modern web and mobile applications.
+// Roled provides a centralized platform for managing users, roles, and permissions across multiple applications.
 //
 // Key features of this SDK:
 //   - Complete OAuth 2.0 PKCE flow support (verifier, challenge, authorize URL, code exchange)
