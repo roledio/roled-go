@@ -246,7 +246,9 @@ func (c *Client) execute(
 	if err != nil {
 		return nil, fmt.Errorf("roled: request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
