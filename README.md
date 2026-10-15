@@ -1,5 +1,6 @@
 <img src="https://roled.io/images/roled-logo-text-dark.png" alt="Roled" style="height: 48px;" /><br/>
 
+[![CI](https://github.com/roledio/roled-go/actions/workflows/ci.yml/badge.svg)](https://github.com/roledio/roled-go/actions/workflows/ci.yml)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=roledio_roled-go&metric=coverage)](https://sonarcloud.io/summary/new_code?id=roledio_roled-go)
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=roledio_roled-go&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=roledio_roled-go)
 [![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=roledio_roled-go&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=roledio_roled-go)
