@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"go.openly.dev/pointy"
 )
 
 func TestUserSessionClient_AutoRefreshOn401(t *testing.T) {
@@ -70,7 +72,7 @@ func TestUserSessionClient_AutoRefreshOn401(t *testing.T) {
 					Data: UserDetails{
 						ID:          "user_123",
 						DisplayName: "Alice",
-						Email:       StringPtr("alice@example.com"),
+						Email:       pointy.String("alice@example.com"),
 						RoleName:    "Admin",
 					},
 				})

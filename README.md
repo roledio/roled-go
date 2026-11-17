@@ -1,7 +1,7 @@
 <img src="https://roled.io/images/roled-logo-text-dark.png" alt="Roled" style="height: 48px;" /><br/>
 
 [![CI](https://github.com/roledio/roled-go/actions/workflows/ci.yml/badge.svg)](https://github.com/roledio/roled-go/actions/workflows/ci.yml)
-[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=roledio_roled-go&metric=coverage)](https://sonarcloud.io/summary/new_code?id=roledio_roled-go)
+[![codecov](https://codecov.io/gh/roledio/roled-go/graph/badge.svg?token=HYPnWLSgSi)](https://codecov.io/gh/roledio/roled-go)
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=roledio_roled-go&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=roledio_roled-go)
 [![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=roledio_roled-go&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=roledio_roled-go)
 [![Go Reference](https://pkg.go.dev/badge/github.com/roledio/roled-go.svg)](https://pkg.go.dev/github.com/roledio/roled-go)
@@ -13,11 +13,77 @@ The official Go SDK for accessing [Roled](https://roled.io/) APIs.
 
 ## Installation
 
-Requires Go 1.22 or later.
+Requires Go 1.23 or later.
 
 ```bash
 go get github.com/roledio/roled-go
 ```
+
+## Quickstart: Drop-in Login for `net/http`
+
+The `stdlib` package gives you a complete OAuth 2.0 PKCE login flow — login, callback, logout, token refresh, and permission middleware — with a few lines of code:
+
+```go
+package main
+
+import (
+	"net/http"
+
+	"github.com/gorilla/sessions"
+	"github.com/roledio/roled-go"
+	"github.com/roledio/roled-go/stdlib"
+)
+
+func main() {
+	client, err := roled.New(
+		roled.WithClientID("YOUR_CLIENT_ID"),
+		roled.WithClientSecret("YOUR_CLIENT_SECRET"),
+		roled.WithRedirectURI("http://localhost:8080/auth/callback"),
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	// Any gorilla/sessions Store works: CookieStore, FilesystemStore, RedisStore, ...
+	store := sessions.NewCookieStore([]byte("a-long-random-session-secret"))
+
+	auth := stdlib.New(client.Auth, store,
+		stdlib.WithSessionName("myapp_session"),
+		stdlib.WithOnCallbackSuccess(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/dashboard", http.StatusFound)
+		}),
+	)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /login", auth.Login)
+	mux.HandleFunc("GET /auth/callback", auth.Callback)
+	mux.HandleFunc("POST /logout", auth.Logout)
+	mux.Handle("GET /dashboard", auth.RequireAuth(http.HandlerFunc(dashboard)))
+	mux.Handle("GET /admin",
+		auth.RequireAuth(
+			auth.RequirePermission("admin:write")(http.HandlerFunc(admin)),
+		),
+	)
+
+	http.ListenAndServe(":8080", mux)
+}
+
+func dashboard(w http.ResponseWriter, r *http.Request) {
+	user := stdlib.AuthSessionFromContext(r.Context())
+	_ = user // *roled.AuthSession with access/refresh tokens
+	inspection := stdlib.TokenInspectionFromContext(r.Context())
+	_ = inspection // *roled.TokenInspection with user, role, permissions
+	w.Write([]byte("dashboard"))
+}
+
+func admin(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("admin only"))
+}
+```
+
+`RequireAuth` automatically refreshes expired access tokens (with refresh-token rotation), inspects the token against Roled on every request, and redirects unauthenticated users to `/login`. `RequirePermission` and `RequireRole` add authorization on top. See [roled-example-go](https://github.com/roledio/roled-example-go) for a complete working app.
+
+Adapters for other frameworks (Fiber, Echo, Gin, ...) are on the roadmap.
 
 ## Usage Guide
 

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"go.openly.dev/pointy"
 )
 
 func TestUserDetails_Helpers(t *testing.T) {
@@ -28,7 +30,7 @@ func TestUserDetails_Helpers(t *testing.T) {
 
 	user := &UserDetails{
 		ID:          "user_1",
-		Email:       StringPtr("alice.smith@example.com"),
+		Email:       pointy.String("alice.smith@example.com"),
 		DisplayName: "Alice Smith",
 		Permissions: []string{"products:read", "products:create"},
 	}
@@ -60,7 +62,7 @@ func TestUserDetails_Helpers(t *testing.T) {
 
 	// Fallback display name to email prefix
 	userNoDisplay := &UserDetails{
-		Email: StringPtr("bob@example.com"),
+		Email: pointy.String("bob@example.com"),
 	}
 	if userNoDisplay.GetDisplayName() != "bob" {
 		t.Errorf("expected 'bob', got %s", userNoDisplay.GetDisplayName())
@@ -106,7 +108,7 @@ func TestUserService_CRUD(t *testing.T) {
 				Success: true,
 				Data: UserDetails{
 					ID:             "u1",
-					ExternalUserID: StringPtr("ext_1"),
+					ExternalUserID: pointy.String("ext_1"),
 					DisplayName:    "Alice",
 				},
 			})
@@ -170,7 +172,7 @@ func TestUserService_CRUD(t *testing.T) {
 				Success: true,
 				Data: UserDetails{
 					ID:    "u_invited",
-					Email: StringPtr("new@example.com"),
+					Email: pointy.String("new@example.com"),
 				},
 			})
 			return
@@ -222,7 +224,7 @@ func TestUserService_CRUD(t *testing.T) {
 	// Create
 	created, err := client.Users.Create(ctx, "p1", CreateUserParams{
 		DisplayName: "Charlie",
-		Email:       StringPtr("charlie@example.com"),
+		Email:       pointy.String("charlie@example.com"),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error creating user: %v", err)
@@ -234,7 +236,7 @@ func TestUserService_CRUD(t *testing.T) {
 	// Update
 	updated, err := client.Users.Update(ctx, "p1", "u1", UpdateUserParams{
 		DisplayName: "Alice Updated",
-		IsActive:    BoolPtr(true),
+		IsActive:    pointy.Bool(true),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error updating user: %v", err)

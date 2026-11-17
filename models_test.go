@@ -2,6 +2,8 @@ package roled
 
 import (
 	"testing"
+
+	"go.openly.dev/pointy"
 )
 
 func TestPagination(t *testing.T) {
@@ -71,17 +73,17 @@ func TestListParams_ToValues(t *testing.T) {
 }
 
 func TestPointerHelpers(t *testing.T) {
-	s := StringPtr("hello")
+	s := pointy.String("hello")
 	if s == nil || *s != "hello" {
 		t.Errorf("expected 'hello', got %v", s)
 	}
 
-	b := BoolPtr(true)
+	b := pointy.Bool(true)
 	if b == nil || !*b {
 		t.Errorf("expected true, got %v", b)
 	}
 
-	i := IntPtr(42)
+	i := pointy.Int(42)
 	if i == nil || *i != 42 {
 		t.Errorf("expected 42, got %v", i)
 	}

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"go.openly.dev/pointy"
 )
 
 func TestClientService(t *testing.T) {
@@ -132,7 +134,7 @@ func TestClientService(t *testing.T) {
 	// Update
 	updated, err := client.Clients.Update(ctx, "p1", "c1", UpdateClientParams{
 		Name:     "Updated Client",
-		IsActive: BoolPtr(true),
+		IsActive: pointy.Bool(true),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
