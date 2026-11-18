@@ -46,9 +46,6 @@ func main() {
 	auth, err := roledhttp.New(client,
 		roledhttp.WithSessionSecret([]byte("a-long-random-session-secret")),
 		roledhttp.WithCookie(roledhttp.WithCookieSecure(true)),
-		roledhttp.WithOnCallbackSuccess(func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/dashboard", http.StatusFound)
-		}),
 	)
 	if err != nil {
 		panic(err)
@@ -59,9 +56,18 @@ func main() {
 	mux.HandleFunc("GET /auth/callback", auth.Callback)
 	mux.HandleFunc("POST /logout", auth.Logout)
 	mux.Handle("GET /dashboard", auth.RequireAuth(http.HandlerFunc(dashboard)))
-	mux.Handle("GET /admin",
-		auth.RequireAuth(
-			auth.RequirePermission("admin:write")(http.HandlerFunc(admin)),
+	mux.Handle("GET /documents",
+		roledHandler.RequireAuth(
+			roledHandler.RequirePermission("documents:read")(
+				http.HandlerFunc(documents),
+			),
+		),
+	)
+	mux.Handle("GET /settings",
+		roledHandler.RequireAuth(
+			roledHandler.RequireRole("admin")(
+				http.HandlerFunc(settings),
+			),
 		),
 	)
 
@@ -76,8 +82,12 @@ func dashboard(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("dashboard"))
 }
 
-func admin(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("admin only"))
+func documents(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("documents"))
+}
+
+func settings(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("settings"))
 }
 ```
 
