@@ -1,16 +1,33 @@
-package stdlib
+package roledhttp
 
-import "net/http"
+import (
+	"net/http"
+)
 
 // Option configures a Handler.
 type Option func(*Handler)
 
-// WithSessionName sets the session/cookie name used to store the auth session.
-func WithSessionName(name string) Option {
+// WithSessionSecret sets the secret used to encrypt and sign the default
+// cookie session store. Required unless WithSessionStore is used.
+func WithSessionSecret(secret []byte) Option {
 	return func(h *Handler) {
-		if name != "" {
-			h.sessionName = name
-		}
+		h.sessionSecret = secret
+	}
+}
+
+// WithSessionStore replaces the default cookie session store with a custom
+// Store implementation (e.g. Redis or database backed).
+func WithSessionStore(store Store) Option {
+	return func(h *Handler) {
+		h.store = store
+	}
+}
+
+// WithCookie applies CookieOptions to the default cookie session store. It has
+// no effect when WithSessionStore is used.
+func WithCookie(opts ...CookieOption) Option {
+	return func(h *Handler) {
+		h.cookieOpts = append(h.cookieOpts, opts...)
 	}
 }
 

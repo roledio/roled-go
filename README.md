@@ -21,7 +21,7 @@ go get github.com/roledio/roled-go
 
 ## Quickstart: Drop-in Login for `net/http`
 
-The `stdlib` package gives you a complete OAuth 2.0 PKCE login flow — login, callback, logout, token refresh, and permission middleware — with a few lines of code:
+The `roledhttp` package gives you a complete OAuth 2.0 PKCE login flow — login, callback, logout, token refresh, and permission middleware — with a few lines of code. Sessions are stored in an encrypted cookie by default; no extra dependencies required.
 
 ```go
 package main
@@ -29,9 +29,8 @@ package main
 import (
 	"net/http"
 
-	"github.com/gorilla/sessions"
 	"github.com/roledio/roled-go"
-	"github.com/roledio/roled-go/stdlib"
+	"github.com/roledio/roled-go/roledhttp"
 )
 
 func main() {
@@ -44,15 +43,16 @@ func main() {
 		panic(err)
 	}
 
-	// Any gorilla/sessions Store works: CookieStore, FilesystemStore, RedisStore, ...
-	store := sessions.NewCookieStore([]byte("a-long-random-session-secret"))
-
-	auth := stdlib.New(client.Auth, store,
-		stdlib.WithSessionName("myapp_session"),
-		stdlib.WithOnCallbackSuccess(func(w http.ResponseWriter, r *http.Request) {
+	auth, err := roledhttp.New(client,
+		roledhttp.WithSessionSecret([]byte("a-long-random-session-secret")),
+		roledhttp.WithCookie(roledhttp.WithCookieSecure(true)),
+		roledhttp.WithOnCallbackSuccess(func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/dashboard", http.StatusFound)
 		}),
 	)
+	if err != nil {
+		panic(err)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /login", auth.Login)
@@ -69,9 +69,9 @@ func main() {
 }
 
 func dashboard(w http.ResponseWriter, r *http.Request) {
-	user := stdlib.AuthSessionFromContext(r.Context())
+	user := roledhttp.AuthSessionFromContext(r.Context())
 	_ = user // *roled.AuthSession with access/refresh tokens
-	inspection := stdlib.TokenInspectionFromContext(r.Context())
+	inspection := roledhttp.TokenInspectionFromContext(r.Context())
 	_ = inspection // *roled.TokenInspection with user, role, permissions
 	w.Write([]byte("dashboard"))
 }
@@ -81,9 +81,14 @@ func admin(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-`RequireAuth` automatically refreshes expired access tokens (with refresh-token rotation), inspects the token against Roled on every request, and redirects unauthenticated users to `/login`. `RequirePermission` and `RequireRole` add authorization on top. See [roled-example-go](https://github.com/roledio/roled-example-go) for a complete working app.
+`RequireAuth` automatically refreshes expired access tokens (with refresh-token rotation), inspects the token against Roled on every request, and redirects unauthenticated users to `/login`. `RequirePermission` and `RequireRole` add authorization on top.
 
-Adapters for other frameworks (Fiber, Echo, Gin, ...) are on the roadmap.
+### Other frameworks
+
+- **Fiber v3**: `github.com/roledio/roled-go/roledfiber` (separate module, requires Go 1.26+) — same API shape, sessions via Fiber's session middleware.
+- Echo, Gin, and others are on the roadmap; they all share the framework-agnostic core in `github.com/roledio/roled-go/web`.
+
+See [roled-example-go](https://github.com/roledio/roled-example-go) for a complete working `net/http` app.
 
 ## Usage Guide
 

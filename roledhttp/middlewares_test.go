@@ -1,4 +1,4 @@
-package stdlib
+package roledhttp
 
 import (
 	"net/http"
@@ -11,7 +11,7 @@ import (
 
 func TestRequireAuthRedirectsWhenUnauthenticated(t *testing.T) {
 	server, _ := newFakeRoled(t)
-	h, _ := newTestHandler(t, server.URL)
+	h := newTestHandler(t, server.URL)
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -30,8 +30,8 @@ func TestRequireAuthRedirectsWhenUnauthenticated(t *testing.T) {
 
 func TestRequireAuthInjectsSessionAndInspection(t *testing.T) {
 	server, _ := newFakeRoled(t)
-	h, store := newTestHandler(t, server.URL)
-	cookie := authenticate(t, h, store)
+	h := newTestHandler(t, server.URL)
+	cookie := authenticate(t, h)
 
 	var gotSession *roled.AuthSession
 	var gotInspection *roled.TokenInspection
@@ -59,38 +59,20 @@ func TestRequireAuthInjectsSessionAndInspection(t *testing.T) {
 
 func TestRequireAuthRefreshesExpiredAccessToken(t *testing.T) {
 	server, fake := newFakeRoled(t)
-	h, store := newTestHandler(t, server.URL)
-	cookie := authenticate(t, h, store)
+	h := newTestHandler(t, server.URL)
+	cookie := authenticate(t, h)
 
 	// Force the stored access token to be expired
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(cookie)
-	sess, err := store.Get(req, defaultSessionName)
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-	authSess, err := loadAuthSession(sess)
-	if err != nil {
-		t.Fatalf("load session: %v", err)
-	}
-	authSess.AccessTokenExpiresAt = time.Now().Add(-time.Hour)
-	if err := setAuthSession(sess, authSess); err != nil {
-		t.Fatalf("set session: %v", err)
-	}
-
-	// Persist using a recorder, then extract the new cookie
-	saveRec := httptest.NewRecorder()
-	if err := sess.Save(req, saveRec); err != nil {
-		t.Fatalf("save session: %v", err)
-	}
-	cookie = sessionCookie(t, saveRec)
+	cookie = mutateSessionForCookie(t, h, cookie, func(authSess *roled.AuthSession) {
+		authSess.AccessTokenExpiresAt = time.Now().Add(-time.Hour)
+	})
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
 	rec := httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
 	req.AddCookie(cookie)
 	h.RequireAuth(next).ServeHTTP(rec, req)
 
@@ -111,31 +93,21 @@ func TestRequireAuthRefreshesExpiredAccessToken(t *testing.T) {
 
 func TestRequireAuthClearsSessionOnRefreshFailure(t *testing.T) {
 	server, fake := newFakeRoled(t)
-	h, store := newTestHandler(t, server.URL)
-	cookie := authenticate(t, h, store)
+	h := newTestHandler(t, server.URL)
+	cookie := authenticate(t, h)
 
 	// Corrupt the session: empty refresh token makes refresh fail
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(cookie)
-	sess, err := store.Get(req, defaultSessionName)
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-	authSess, _ := loadAuthSession(sess)
-	authSess.RefreshToken = ""
-	authSess.AccessTokenExpiresAt = time.Now().Add(-time.Hour)
-	_ = setAuthSession(sess, authSess)
-
-	saveRec := httptest.NewRecorder()
-	_ = sess.Save(req, saveRec)
-	cookie = sessionCookie(t, saveRec)
+	cookie = mutateSessionForCookie(t, h, cookie, func(authSess *roled.AuthSession) {
+		authSess.RefreshToken = ""
+		authSess.AccessTokenExpiresAt = time.Now().Add(-time.Hour)
+	})
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
 	rec := httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
 	req.AddCookie(cookie)
 	h.RequireAuth(next).ServeHTTP(rec, req)
 
@@ -149,8 +121,8 @@ func TestRequireAuthClearsSessionOnRefreshFailure(t *testing.T) {
 
 func TestRequirePermission(t *testing.T) {
 	server, fake := newFakeRoled(t)
-	h, store := newTestHandler(t, server.URL)
-	cookie := authenticate(t, h, store)
+	h := newTestHandler(t, server.URL)
+	cookie := authenticate(t, h)
 
 	fake.mu.Lock()
 	fake.inspection.Permissions = []string{"docs:read", "docs:write"}
@@ -182,13 +154,13 @@ func TestRequirePermission(t *testing.T) {
 func TestRequirePermissionCustomForbiddenHandler(t *testing.T) {
 	server, fake := newFakeRoled(t)
 	var forbiddenCalled bool
-	h, store := newTestHandler(t, server.URL,
+	h := newTestHandler(t, server.URL,
 		WithOnForbidden(func(w http.ResponseWriter, r *http.Request) {
 			forbiddenCalled = true
 			w.WriteHeader(http.StatusTeapot)
 		}),
 	)
-	cookie := authenticate(t, h, store)
+	cookie := authenticate(t, h)
 
 	fake.mu.Lock()
 	fake.inspection.Permissions = []string{}
@@ -213,8 +185,8 @@ func TestRequirePermissionCustomForbiddenHandler(t *testing.T) {
 
 func TestRequireRole(t *testing.T) {
 	server, fake := newFakeRoled(t)
-	h, store := newTestHandler(t, server.URL)
-	cookie := authenticate(t, h, store)
+	h := newTestHandler(t, server.URL)
+	cookie := authenticate(t, h)
 
 	fake.mu.Lock()
 	fake.inspection.Role = &roled.TokenRoleSummary{ID: "role_1", Code: "admin", Name: "Admin"}
@@ -245,8 +217,8 @@ func TestRequireRole(t *testing.T) {
 
 func TestAuthSessionHelper(t *testing.T) {
 	server, _ := newFakeRoled(t)
-	h, store := newTestHandler(t, server.URL)
-	cookie := authenticate(t, h, store)
+	h := newTestHandler(t, server.URL)
+	cookie := authenticate(t, h)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(cookie)

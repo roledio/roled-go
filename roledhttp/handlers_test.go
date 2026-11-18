@@ -1,4 +1,4 @@
-package stdlib
+package roledhttp
 
 import (
 	"encoding/json"
@@ -10,14 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/sessions"
 	"github.com/roledio/roled-go"
+	"github.com/roledio/roled-go/web"
 )
 
-var testKeyPairs = [][]byte{
-	[]byte("0123456789abcdef0123456789abcdef"), // hash key
-	[]byte("0123456789abcdef0123456789abcdef"), // block key
-}
+var testSecret = []byte("test-session-secret-32-bytes-0000")
 
 type fakeRoled struct {
 	mu sync.Mutex
@@ -122,7 +119,7 @@ func newFakeRoled(t *testing.T) (*httptest.Server, *fakeRoled) {
 	return server, fake
 }
 
-func newTestHandler(t *testing.T, baseURL string, opts ...Option) (*Handler, sessions.Store) {
+func newTestClient(t *testing.T, baseURL string) *roled.Client {
 	t.Helper()
 
 	client, err := roled.NewClient(
@@ -133,10 +130,18 @@ func newTestHandler(t *testing.T, baseURL string, opts ...Option) (*Handler, ses
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
+	return client
+}
 
-	store := sessions.NewCookieStore(testKeyPairs...)
-	h := New(client.Auth, store, opts...)
-	return h, store
+func newTestHandler(t *testing.T, baseURL string, opts ...Option) *Handler {
+	t.Helper()
+
+	opts = append([]Option{WithSessionSecret(testSecret)}, opts...)
+	h, err := New(newTestClient(t, baseURL), opts...)
+	if err != nil {
+		t.Fatalf("failed to create handler: %v", err)
+	}
+	return h
 }
 
 func sessionCookie(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
@@ -150,24 +155,58 @@ func sessionCookie(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
 	return nil
 }
 
-func loadSessionForCookie(t *testing.T, store sessions.Store, cookie *http.Cookie) *roled.AuthSession {
+func loadSessionForCookie(t *testing.T, h *Handler, cookie *http.Cookie) *roled.AuthSession {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(cookie)
-	sess, err := store.Get(req, defaultSessionName)
+	sess, err := h.store.Open(req, nil)
 	if err != nil {
-		t.Fatalf("failed to get session: %v", err)
+		t.Fatalf("failed to open session: %v", err)
 	}
-	authSess, err := loadAuthSession(sess)
+	authSess, err := web.LoadAuthSession(sess)
 	if err != nil {
 		t.Fatalf("failed to load auth session: %v", err)
 	}
 	return authSess
 }
 
+// mutateSessionForCookie loads the session for cookie, applies fn, and saves
+// it through a recorder, returning the new session cookie.
+func mutateSessionForCookie(t *testing.T, h *Handler, cookie *http.Cookie, fn func(*roled.AuthSession)) *http.Cookie {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(cookie)
+	sess, err := h.store.Open(req, nil)
+	if err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+
+	authSess, err := web.LoadAuthSession(sess)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	fn(authSess)
+
+	// Re-open with a writer so Save can persist the cookie.
+	rec := httptest.NewRecorder()
+	writeSess, err := h.store.Open(req, rec)
+	if err != nil {
+		t.Fatalf("open session for write: %v", err)
+	}
+	if err := web.SetAuthSession(writeSess, authSess); err != nil {
+		t.Fatalf("set session: %v", err)
+	}
+	if err := writeSess.Save(); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+
+	return sessionCookie(t, rec)
+}
+
 // authenticate runs the full login + callback flow and returns the session
 // cookie to use on subsequent requests.
-func authenticate(t *testing.T, h *Handler, store sessions.Store) *http.Cookie {
+func authenticate(t *testing.T, h *Handler) *http.Cookie {
 	t.Helper()
 
 	// Login
@@ -179,7 +218,7 @@ func authenticate(t *testing.T, h *Handler, store sessions.Store) *http.Cookie {
 	cookie := sessionCookie(t, rec)
 
 	// Read state stored in session
-	authSess := loadSessionForCookie(t, store, cookie)
+	authSess := loadSessionForCookie(t, h, cookie)
 	if authSess.OAuthState == "" || authSess.PKCEVerifier == "" {
 		t.Fatal("login did not store OAuth state or PKCE verifier")
 	}
@@ -200,9 +239,16 @@ func authenticate(t *testing.T, h *Handler, store sessions.Store) *http.Cookie {
 	return sessionCookie(t, cbRec)
 }
 
+func TestNewRequiresSecretOrStore(t *testing.T) {
+	client := newTestClient(t, "http://localhost")
+	if _, err := New(client); err == nil {
+		t.Fatal("expected error when no session secret or store is provided")
+	}
+}
+
 func TestLoginRedirectsToAuthorizeURL(t *testing.T) {
 	server, _ := newFakeRoled(t)
-	h, store := newTestHandler(t, server.URL)
+	h := newTestHandler(t, server.URL)
 
 	rec := httptest.NewRecorder()
 	h.Login(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
@@ -230,7 +276,13 @@ func TestLoginRedirectsToAuthorizeURL(t *testing.T) {
 		}
 	}
 
-	authSess := loadSessionForCookie(t, store, sessionCookie(t, rec))
+	// Cookie value must be encrypted: it should not contain plaintext state.
+	cookie := sessionCookie(t, rec)
+	if strings.Contains(cookie.Value, "state") {
+		t.Error("session cookie appears to be unencrypted")
+	}
+
+	authSess := loadSessionForCookie(t, h, cookie)
 	if authSess.OAuthState == "" {
 		t.Error("OAuthState not stored in session")
 	}
@@ -241,15 +293,15 @@ func TestLoginRedirectsToAuthorizeURL(t *testing.T) {
 
 func TestCallbackSuccess(t *testing.T) {
 	server, _ := newFakeRoled(t)
-	h, store := newTestHandler(t, server.URL,
+	h := newTestHandler(t, server.URL,
 		WithOnCallbackSuccess(func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/dashboard", http.StatusFound)
 		}),
 	)
 
-	cookie := authenticate(t, h, store)
+	cookie := authenticate(t, h)
 
-	authSess := loadSessionForCookie(t, store, cookie)
+	authSess := loadSessionForCookie(t, h, cookie)
 	if authSess.AccessToken != "access_token_initial" {
 		t.Errorf("unexpected access token: %q", authSess.AccessToken)
 	}
@@ -266,7 +318,7 @@ func TestCallbackSuccess(t *testing.T) {
 
 func TestCallbackRejectsInvalidState(t *testing.T) {
 	server, _ := newFakeRoled(t)
-	h, _ := newTestHandler(t, server.URL)
+	h := newTestHandler(t, server.URL)
 
 	// Login to obtain a session with a pending state
 	rec := httptest.NewRecorder()
@@ -285,7 +337,7 @@ func TestCallbackRejectsInvalidState(t *testing.T) {
 
 func TestCallbackRejectsMissingSession(t *testing.T) {
 	server, _ := newFakeRoled(t)
-	h, _ := newTestHandler(t, server.URL)
+	h := newTestHandler(t, server.URL)
 
 	rec := httptest.NewRecorder()
 	h.Callback(rec, httptest.NewRequest(http.MethodGet, "/auth/callback?code=x&state=y", nil))
@@ -297,7 +349,7 @@ func TestCallbackRejectsMissingSession(t *testing.T) {
 
 func TestCallbackHandlesOAuthError(t *testing.T) {
 	server, _ := newFakeRoled(t)
-	h, _ := newTestHandler(t, server.URL)
+	h := newTestHandler(t, server.URL)
 
 	rec := httptest.NewRecorder()
 	h.Login(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
@@ -316,14 +368,14 @@ func TestCallbackHandlesOAuthError(t *testing.T) {
 func TestLogoutRevokesAndClearsSession(t *testing.T) {
 	server, fake := newFakeRoled(t)
 	var loggedOut bool
-	h, store := newTestHandler(t, server.URL,
+	h := newTestHandler(t, server.URL,
 		WithOnLogoutSuccess(func(w http.ResponseWriter, r *http.Request) {
 			loggedOut = true
 			http.Redirect(w, r, "/", http.StatusFound)
 		}),
 	)
 
-	cookie := authenticate(t, h, store)
+	cookie := authenticate(t, h)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
@@ -340,15 +392,14 @@ func TestLogoutRevokesAndClearsSession(t *testing.T) {
 		t.Errorf("expected 1 revoke call, got %d", fake.revokeCalls)
 	}
 
-	// Session must be cleared: reload via store using the *new* cookie if set,
-	// otherwise the old one still decodes but holds no tokens.
+	// Logout clears all values, so the store writes an expired cookie.
 	newCookie := cookie
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == defaultSessionName {
 			newCookie = c
 		}
 	}
-	authSess := loadSessionForCookie(t, store, newCookie)
+	authSess := loadSessionForCookie(t, h, newCookie)
 	if authSess.IsAuthenticated() {
 		t.Error("session should not be authenticated after logout")
 	}
